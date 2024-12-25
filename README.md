@@ -1,5 +1,7 @@
 # Linuxi pask
 
+Vaata, et teed kõik root kasutajaga!!
+
 ## Description
 
 Siin on igast jama mida ise kasutan kui vaja. sitaks mugav vahepeal noh mdea:
