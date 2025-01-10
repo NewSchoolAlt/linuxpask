@@ -29,7 +29,6 @@ clone_plugin() {
 
 # Install plugins
 clone_plugin https://github.com/MichaelAquilina/zsh-you-should-use.git $ZSH_CUSTOM/plugins/you-should-use
-clone_plugin https://github.com/jeffreytse/zsh-bat.git $ZSH_CUSTOM/plugins/zsh-bat
 clone_plugin https://github.com/zsh-users/zsh-syntax-highlighting.git $ZSH_CUSTOM/plugins/zsh-syntax-highlighting
 clone_plugin https://github.com/zsh-users/zsh-autosuggestions.git $ZSH_CUSTOM/plugins/zsh-autosuggestions
 clone_plugin https://github.com/marlonrichert/zsh-autocomplete.git $ZSH_CUSTOM/plugins/zsh-autocomplete
