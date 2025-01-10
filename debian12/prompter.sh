@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# VERY WIP
-
-
 # Ensure zsh is installed
 if ! command -v zsh &> /dev/null; then
   echo "Zsh is not installed. Please install zsh first."
@@ -24,7 +21,7 @@ clone_plugin() {
   local plugin_dir=$2
   if [ ! -d "$plugin_dir" ]; then
     echo "Installing $(basename $plugin_dir)..."
-    git clone $repo $plugin_dir
+    git clone --depth=1 $repo $plugin_dir
   else
     echo "$(basename $plugin_dir) is already installed."
   fi
