@@ -1,5 +1,7 @@
 #!/bin/bash
 
+
+
 # Function to prompt user for version selection
 prompt_version() {
     local component=$1
@@ -29,10 +31,10 @@ prompt_version() {
 }
 
 # Update package list
-sudo apt-get update
+apt-get update
 
 # Install curl and sudo
-sudo apt-get install -y curl sudo
+apt-get install -y curl sudo
 
 # Install Docker
 sudo apt-get install -y ca-certificates
