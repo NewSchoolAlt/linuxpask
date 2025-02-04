@@ -1,24 +1,22 @@
-# Palume kasutajal sisestada eesnimi ja perenimi
-$eesnimi = Read-Host "Sisestage eesnimi"
-$perenimi = Read-Host "Sisestage perenimi"
+# Küsib kasutaja eesnime
+$firstName = Read-Host "Enter the user's first name"
+# Küsib kasutaja perekonnanime
+$lastName = Read-Host "Enter the user's last name"
 
-# Loome kasutajanime formaadis ees.perenimi ja teisendame selle väikesteks tähtedeks
-$kasutajanimi = "$($eesnimi).$($perenimi)".ToLower()
+# Koostab kasutajanime (eesnime esimene täht + perekonnanimi)
+$username = ($firstName.Substring(0,1) + $lastName).ToLower()
 
-# Määrame kasutaja täisnime ja kirjelduse
-$fullname = "$eesnimi $perenimi"
-$kirjeldus = "Kasutaja $fullname"
+# Kontrollib, kas kasutaja juba eksisteerib
+if (Get-LocalUser -Name $username -ErrorAction SilentlyContinue) {
+    # Kuvab veateate, kui kasutajanimi on juba olemas
+    Write-Host "Error: A user with the username '$username' already exists."
+} else {
+    # Loob turvalise parooli
+    $password = Read-Host "Enter a password for the new user" -AsSecureString
 
-# Kontrollime, kas kasutaja juba eksisteerib
-if (Get-LocalUser -Name $kasutajanimi -ErrorAction SilentlyContinue) {
-    Write-Host "Kasutaja '$kasutajanimi' juba eksisteerib. Skript katkestatakse."
-    exit
-}
+    # Loob uue kohaliku kasutaja
+    New-LocalUser -Name $username -FullName "$firstName $lastName" -Password $password -PasswordNeverExpires:$true
 
-# Püüame luua uue kohaliku kasutaja
-try {
-    New-LocalUser -Name $kasutajanimi -FullName $fullname -Description $kirjeldus -Password (ConvertTo-SecureString "Parool1!" -AsPlainText -Force) -PasswordNeverExpires
-    Write-Host "Kasutaja '$kasutajanimi' on edukalt loodud."
-} catch {
-    Write-Host "Kasutaja loomine ebaõnnestus järgmise veateatega: $_"
+    # Kuvab teate, et kasutaja on edukalt loodud
+    Write-Host "User '$username' has been created successfully."
 }
