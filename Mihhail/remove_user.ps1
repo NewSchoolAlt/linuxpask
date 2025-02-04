@@ -1,19 +1,3 @@
-# Funktsioon kõigi kohalike kasutajakontode loetlemiseks
-function List-LocalUsers {
-    $users = Get-LocalUser
-    if ($users.Count -eq 0) {
-        Write-Host "Kohalikke kasutajakontosid ei leitud."
-    } else {
-        Write-Host "Kohalikud kasutajakontod:"
-        $users | ForEach-Object { Write-Host $_.Name }
-    }
-}
-
-# Küsib, kas loetleda kõik kasutajad
-$listUsers = Read-Host "Kas soovite loetleda kõik kohalikud kasutajakontod? (Y/N)"
-if ($listUsers -eq 'Y') {
-    List-LocalUsers
-}
 
 # Küsib kasutaja eesnime
 $firstName = Read-Host "Sisestage kasutaja eesnimi"
