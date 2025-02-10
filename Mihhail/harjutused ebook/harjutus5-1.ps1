@@ -1,0 +1,1 @@
+Get-Process | Where-Object {$_.ProcessName -eq "notepad"} | Select-Object ProcessName,Id
