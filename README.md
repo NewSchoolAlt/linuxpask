@@ -1,3 +1,8 @@
+
+# Mihhail
+
+Mihhaili asjad on Mihhaili kaustas, kui tahad neid, ignoreeri muud
+
 # Linuxi pask
 
 Vaata, et teed kõik root kasutajaga!!
