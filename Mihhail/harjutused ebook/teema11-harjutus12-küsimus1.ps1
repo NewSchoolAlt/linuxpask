@@ -1,12 +1,8 @@
-function countstart
-{
-    $start = Get-Service -ErrorAction SilentlyContinue | ?{$_.Status -eq "Running"}
-    Write-Host "Total services in running state = "$start.count
+function Count-Services {
+    param ([string]$status)
+    $count = (Get-Service   -ErrorAction SilentlyContinue  | Where-Object { $_.Status -eq $status }).Count
+    Write-Host "Total services in $status state: $count"
 }
-function countstop
-{
-    $stop = Get-Service -ErrorAction SilentlyContinue | ?{$_.Status -eq "Stopped"}
-    Write-Host "Total services in stopped state = "$stop.count
-}
-countstart
-countstop
+
+Count-Services -status Running
+Count-Services -status Stopped
