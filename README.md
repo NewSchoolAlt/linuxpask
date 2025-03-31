@@ -29,7 +29,7 @@ Igast jama mis parandab või seadistab debianis igast värki (tested on 12)
 
 see on siis kui apt ütleb, et on mingi pask bookwormi repo. paste see noh mdea.
 
-    wget -qO- https://raw.githubusercontent.com/NewSchoolAlt/linuxpask/refs/heads/main/debian12/fix_repos.sh | bash
+    wget -qO- https://raw.githubusercontent.com/NewSchoolAlt/linuxpask/refs/heads/main/deb-based/fix_repos.sh | bash
 
 
 ## suggestions
