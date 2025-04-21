@@ -13,12 +13,11 @@ command_exists() {
     command -v "$1" &> /dev/null
 }
 
-# Check if the script is run as root
+# Ensure script is run as root
 if [ "$EUID" -ne 0 ]; then
-    echo " "
-    echo " message from buan:"
-    echo "This script must be run as root stoopid. re-run it using sudo or as the root user."
-    echo " "
+    echo
+    echo " message from buan: This script must be run as root stoopid. re-run it using sudo or as the root user."
+    echo
     exit 1
 fi
 
@@ -35,18 +34,28 @@ VERSION=$(lsb_release -cs)
 
 # Backup the existing sources.list
 log "Backing up the current sources.list to /etc/apt/sources.list.bak"
-if ! cp /etc/apt/sources.list /etc/apt/sources.list.bak; then
-    log "Failed to back up /etc/apt/sources.list. Aborting."
-    exit 1
+cp -f /etc/apt/sources.list /etc/apt/sources.list.bak
+
+# Clear out the main sources.list to avoid duplicates
+log "Clearing /etc/apt/sources.list to rely on .d files exclusively"
+: > /etc/apt/sources.list
+
+# Determine .list filename and remove any old copy
+LIST_FILE="/etc/apt/sources.list.d/${DISTRO,,}-${VERSION}.list"
+if [ -f "$LIST_FILE" ]; then
+    log "Removing existing file $LIST_FILE"
+    rm -f "$LIST_FILE"
 fi
 
-# Update sources.list with the correct components based on the distribution and version
-log "Updating /etc/apt/sources.list with the new repository structure for $DISTRO $VERSION..."
+# Create new repository file
+log "Creating new repo list at $LIST_FILE for $DISTRO $VERSION"
 case "$DISTRO" in
     Debian)
         case "$VERSION" in
             bullseye|bookworm)
-                cat > /etc/apt/sources.list.d/"$VERSION".list << EOF
+                cat > "$LIST_FILE" << EOF
+# Debian $VERSION - main, contrib, non-free, firmware
+# Official mirrors
 deb http://deb.debian.org/debian $VERSION main contrib non-free non-free-firmware
 deb http://security.debian.org/debian-security $VERSION-security main contrib non-free non-free-firmware
 deb http://deb.debian.org/debian $VERSION-updates main contrib non-free non-free-firmware
@@ -59,7 +68,8 @@ EOF
         esac
         ;;
     Ubuntu)
-        cat > /etc/apt/sources.list.d/"$VERSION".list << EOF
+        cat > "$LIST_FILE" << EOF
+# Ubuntu $VERSION - main, restricted, universe, multiverse
 deb http://archive.ubuntu.com/ubuntu $VERSION main restricted universe multiverse
 deb http://archive.ubuntu.com/ubuntu $VERSION-updates main restricted universe multiverse
 deb http://archive.ubuntu.com/ubuntu $VERSION-backports main restricted universe multiverse
@@ -67,7 +77,8 @@ deb http://security.ubuntu.com/ubuntu $VERSION-security main restricted universe
 EOF
         ;;
     Kali)
-        cat > /etc/apt/sources.list.d/"$VERSION".list << EOF
+        cat > "$LIST_FILE" << EOF
+# Kali $VERSION
 deb http://http.kali.org/kali $VERSION main non-free contrib
 EOF
         ;;
@@ -78,13 +89,11 @@ EOF
         ;;
 esac
 
-# Update the package list
+# Update and upgrade
 log "Updating package list..."
 apt-get update
 
-# Upgrade available packages
 log "Upgrading packages..."
 apt-get upgrade -y
 
-# Notify the user
 log "Done! Your system has been updated with the new repository structure and packages have been upgraded."
