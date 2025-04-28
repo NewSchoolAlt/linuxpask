@@ -1,127 +1,125 @@
 #!/usr/bin/env bash
+#
+# make-static.sh
+# Convert current DHCP lease into a static IP config on Debian 12.
+#
+# Usage: sudo ./make-static.sh
+# (Optionally set INTERFACE=eth0 on the command line)
 
 set -euo pipefail
 
-# --- Constants ---
-INTERFACES_FILE="/etc/network/interfaces"
-BACKUP_DIR="/etc/network"
-TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-BACKUP_FILE="$BACKUP_DIR/interfaces.bak.$TIMESTAMP"
+# -- Helpers ------------------------------------------------------------------
 
-print_usage() {
-  cat << EOF
-Usage: $0 [--ifname IFACE] [--mode dhcp|static] [--ip IP --netmask NM --gateway GW --dns "DNS1 DNS2"]
-If run without arguments, the script will prompt interactively.
-Options:
-  --ifname    Network interface name (e.g., eth0)
-  --mode      dhcp | static
-  --ip        Static IP address          (required for static)
-  --netmask   Network mask               (required for static)
-  --gateway   Default gateway            (required for static)
-  --dns       Space-separated DNS servers (required for static)
-  -h, --help  Show this help message
-EOF
-  exit 1
-}
-
-interactive_prompt() {
-  echo "No arguments provided. Entering interactive mode..."
-  # Prompt for interface
-  while true; do
-    read -rp "Interface name (e.g., eth0): " IFACE
-    [[ -n "$IFACE" ]] && break
-    echo "Interface cannot be empty."
-  done
-
-  # Prompt for mode using a validated select
-  PS3="Select mode (1 for dhcp, 2 for static): "
-  options=("dhcp" "static")
-  select choice in "${options[@]}"; do
-    if [[ -n "$choice" ]]; then
-      MODE=$choice
-      break
-    else
-      echo "Invalid choice. Please enter 1 or 2."
+# Convert CIDR prefix length (e.g. "24") into dotted netmask (e.g. "255.255.255.0").
+prefix_to_netmask() {
+  local prefix=$1
+  local i octet mask=""
+  local full_octets=$(( prefix / 8 ))
+  local rem=$(( prefix % 8 ))
+  for ((i=0; i<4; i++)); do
+    if   (( i < full_octets )); then octet=255
+    elif (( i == full_octets )); then octet=$(( (0xFF << (8-rem)) & 0xFF ))
+    else octet=0
     fi
+    mask+=$octet
+    [[ $i -lt 3 ]] && mask+=.
   done
-
-  # If static, prompt for details
-  if [[ "$MODE" == "static" ]]; then
-    read -rp "Static IP address: " IP
-    read -rp "Netmask: " NETMASK
-    read -rp "Gateway: " GATEWAY
-    read -rp "DNS servers (space-separated): " DNS
-  fi
+  echo "$mask"
 }
 
-# --- Parse args ---
-if [[ " ${*:-} " =~ " -h " || " ${*:-} " =~ " --help " ]]; then
-  print_usage
-fi
-
-# Process flags
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    --ifname)   IFACE="$2"; shift 2;;
-    --mode)     MODE="$2"; shift 2;;
-    --ip)       IP="$2"; shift 2;;
-    --netmask)  NETMASK="$2"; shift 2;;
-    --gateway)  GATEWAY="$2"; shift 2;;
-    --dns)      DNS="$2"; shift 2;;
-    *)          echo "Unknown option: $1"; print_usage;;
-  esac
-done
-
-# Enter interactive if missing required
-if [[ -z "${IFACE:-}" || -z "${MODE:-}" ]]; then
-  interactive_prompt
-fi
-
-# Validate root
+# Ensure running as root
 if [[ $EUID -ne 0 ]]; then
-  echo "This script must be run as root." >&2
+  echo "⚠️  Please run as root (e.g. sudo $0)" >&2
   exit 1
 fi
 
-# Validate static params
-if [[ "$MODE" == "static" ]]; then
-  for var in IP NETMASK GATEWAY DNS; do
-    if [[ -z "${!var:-}" ]]; then
-      echo "Static mode requires $var to be set." >&2
-      exit 1
-    fi
-  done
-fi
+# -- Detect current settings -----------------------------------------------
 
-# Backup original
-cp "$INTERFACES_FILE" "$BACKUP_FILE"
-echo "Backup saved: $BACKUP_FILE"
+# Allow override
+IFACE="${INTERFACE:-}"
 
-# Write new config
-{
-  echo "source /etc/network/interfaces.d/*"
-  echo
-  echo "auto $IFACE"
-  if [[ "$MODE" == "dhcp" ]]; then
-    echo "iface $IFACE inet dhcp"
-  else
-    echo "iface $IFACE inet static"
-    echo "    address $IP"
-    echo "    netmask $NETMASK"
-    echo "    gateway $GATEWAY"
-    for dns in $DNS; do
-      echo "    dns-nameservers $dns"
-    done
+# 1) Find primary interface if not specified
+if [[ -z "$IFACE" ]]; then
+  IFACE=$(ip route 2>/dev/null | awk '/^default/ { print $5; exit }')
+  if [[ -z "$IFACE" ]]; then
+    echo "❌  Could not detect primary interface." >&2
+    exit 1
   fi
-} > "$INTERFACES_FILE"
+fi
+echo "Detected interface: $IFACE"
 
-# Apply changes
-if systemctl restart networking; then
-  echo "Interface $IFACE is now set to $MODE mode."
-else
-  echo "Failed to restart networking. Restoring backup..." >&2
-  mv "$BACKUP_FILE" "$INTERFACES_FILE"
-  systemctl restart networking
-  echo "Restored previous configuration."
+# 2) IP + prefix
+ip_cidr=$(ip -4 -o addr show dev "$IFACE" \
+         | awk '{ sub("/"," "); print $4"/"$4 }' \
+         | head -n1)
+# Better parsing
+ip_cidr=$(ip -4 -o addr show dev "$IFACE" \
+         | awk '{print $4}' \
+         | head -n1)
+
+if [[ -z "$ip_cidr" ]]; then
+  echo "❌  No IPv4 address found on $IFACE." >&2
   exit 1
 fi
+IP="${ip_cidr%/*}"
+PREFIX="${ip_cidr#*/}"
+NETMASK=$(prefix_to_netmask "$PREFIX")
+echo "IP address:   $IP"
+echo "Netmask:      $NETMASK"
+
+# 3) Gateway
+GATEWAY=$(ip route | awk '/^default/ { print $3; exit }')
+if [[ -z "$GATEWAY" ]]; then
+  echo "❌  No default gateway found." >&2
+  exit 1
+fi
+echo "Gateway:      $GATEWAY"
+
+# 4) DNS (take first two from resolv.conf)
+readarray -t DNS_SERVERS < <(awk '/^nameserver/ { print $2 }' /etc/resolv.conf | uniq | head -n2)
+DNS_LINE=""
+if ((${#DNS_SERVERS[@]})); then
+  DNS_LINE="    dns-nameservers ${DNS_SERVERS[*]}"
+  echo "DNS servers:  ${DNS_SERVERS[*]}"
+else
+  echo "⚠️  No DNS servers found in /etc/resolv.conf."
+fi
+
+# -- Backup and rewrite -----------------------------------------------------
+
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+SRC="/etc/network/interfaces"
+BACKUP="${SRC}.dhcp-to-static.bak-${TIMESTAMP}"
+
+echo "Backing up $SRC → $BACKUP"
+cp -p "$SRC" "$BACKUP"
+
+cat > "$SRC" <<EOF
+# /etc/network/interfaces — generated by make-static.sh on $(date)
+# Loopback
+auto lo
+iface lo inet loopback
+
+# Static config for $IFACE
+auto $IFACE
+iface $IFACE inet static
+    address $IP
+    netmask $NETMASK
+    gateway $GATEWAY
+$DNS_LINE
+EOF
+
+echo "Wrote new static config to $SRC"
+
+# -- Restart networking -----------------------------------------------------
+
+echo "Restarting networking..."
+if systemctl is-active --quiet networking; then
+  systemctl restart networking
+else
+  # fallback
+  ifdown "$IFACE" || true
+  ifup   "$IFACE"
+fi
+
+echo "✅  $IFACE is now STATIC ($IP/$PREFIX via $GATEWAY)"
