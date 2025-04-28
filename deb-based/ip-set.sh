@@ -1,62 +1,84 @@
 #!/usr/bin/env bash
 #
 # make-static.sh
-# Convert current DHCP lease into a static IP config on Debian 12.
+# Convert current DHCP lease into a static IP config on Debian 12,
+# with optional custom DNS servers and a default fallback.
 #
-# Usage: sudo ./make-static.sh
-# (Optionally set INTERFACE=eth0 on the command line)
-
+# Usage:
+#   sudo ./make-static.sh [-i interface] [-d "dns1 dns2"]
+#
 set -euo pipefail
 
-# -- Helpers ------------------------------------------------------------------
+# -- Usage -------------------------------------------------------------------
+usage() {
+  cat <<EOF
+Usage: sudo $0 [options]
 
-# Convert CIDR prefix length (e.g. "24") into dotted netmask (e.g. "255.255.255.0").
+Options:
+  -i, --interface IFACE    Specify the network interface (default: pick default route)
+  -d, --dns "IP1 IP2"      Provide one or two DNS servers (overrides DHCP and default)
+  -h, --help               Show this help message and exit
+EOF
+}
+
+# -- Defaults ---------------------------------------------------------------
+DEFAULT_DNS="192.168.25.46"  # Always ensure this is first if not overridden
+
+# -- Parse CLI Options ------------------------------------------------------
+INTERFACE=""
+DNS_OVERRIDE=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -i|--interface)
+      INTERFACE="$2"; shift 2;;
+    -d|--dns)
+      read -r -a DNS_OVERRIDE <<< "$2"; shift 2;;
+    -h|--help)
+      usage; exit 0;;
+    *)
+      echo "Unknown option: $1" >&2; usage; exit 1;;
+  esac
+done
+
+# -- Helpers ----------------------------------------------------------------
 prefix_to_netmask() {
-  local prefix=$1
-  local i octet mask=""
+  local prefix=$1 i octet mask=""
   local full_octets=$(( prefix / 8 ))
   local rem=$(( prefix % 8 ))
   for ((i=0; i<4; i++)); do
-    if   (( i < full_octets )); then octet=255
+    if (( i < full_octets )); then octet=255
     elif (( i == full_octets )); then octet=$(( (0xFF << (8-rem)) & 0xFF ))
     else octet=0
     fi
-    mask+=$octet
-    [[ $i -lt 3 ]] && mask+=.
+    mask+="$octet"
+    [[ $i -lt 3 ]] && mask+='.'
   done
   echo "$mask"
 }
 
-# Ensure running as root
+# -- Ensure running as root ------------------------------------------------
 if [[ $EUID -ne 0 ]]; then
   echo "⚠️  Please run as root (e.g. sudo $0)" >&2
   exit 1
 fi
 
 # -- Detect current settings -----------------------------------------------
-
-# Allow override
-IFACE="${INTERFACE:-}"
-
-# 1) Find primary interface if not specified
-if [[ -z "$IFACE" ]]; then
+# 1) Determine interface
+if [[ -n "$INTERFACE" ]]; then
+  IFACE="$INTERFACE"
+else
   IFACE=$(ip route 2>/dev/null | awk '/^default/ { print $5; exit }')
   if [[ -z "$IFACE" ]]; then
     echo "❌  Could not detect primary interface." >&2
     exit 1
   fi
 fi
-echo "Detected interface: $IFACE"
+
+echo "Using interface: $IFACE"
 
 # 2) IP + prefix
-ip_cidr=$(ip -4 -o addr show dev "$IFACE" \
-         | awk '{ sub("/"," "); print $4"/"$4 }' \
-         | head -n1)
-# Better parsing
-ip_cidr=$(ip -4 -o addr show dev "$IFACE" \
-         | awk '{print $4}' \
-         | head -n1)
-
+ip_cidr=$(ip -4 -o addr show dev "$IFACE" | awk '{print $4}' | head -n1)
 if [[ -z "$ip_cidr" ]]; then
   echo "❌  No IPv4 address found on $IFACE." >&2
   exit 1
@@ -75,20 +97,27 @@ if [[ -z "$GATEWAY" ]]; then
 fi
 echo "Gateway:      $GATEWAY"
 
-# 4) DNS (take first two from resolv.conf)
-readarray -t DNS_SERVERS < <(awk '/^nameserver/ { print $2 }' /etc/resolv.conf | uniq | head -n2)
-DNS_LINE=""
-if ((${#DNS_SERVERS[@]})); then
-  DNS_LINE="    dns-nameservers ${DNS_SERVERS[*]}"
-  echo "DNS servers:  ${DNS_SERVERS[*]}"
+# 4) DNS
+if ((${#DNS_OVERRIDE[@]})); then
+  # User-provided DNS servers
+  DNS_SERVERS=(${DNS_OVERRIDE[@]})
+  echo "Using custom DNS servers: ${DNS_SERVERS[*]}"
 else
-  echo "⚠️  No DNS servers found in /etc/resolv.conf."
+  # Fallback: ensure DEFAULT_DNS and DHCP-provided servers
+  readarray -t dhcp_dns < <(awk '/^nameserver/ { print $2 }' /etc/resolv.conf | uniq)
+  DNS_SERVERS=("$DEFAULT_DNS")
+  for dns in "${dhcp_dns[@]}"; do
+    [[ "${DNS_SERVERS[*]}" =~ $dns ]] && continue
+    DNS_SERVERS+=("$dns")
+    (( ${#DNS_SERVERS[@]} >= 2 )) && break
+  done
+  echo "DNS servers: ${DNS_SERVERS[*]}"
 fi
+DNS_LINE="    dns-nameservers ${DNS_SERVERS[*]}"
 
 # -- Backup and rewrite -----------------------------------------------------
-
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 SRC="/etc/network/interfaces"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP="${SRC}.dhcp-to-static.bak-${TIMESTAMP}"
 
 echo "Backing up $SRC → $BACKUP"
@@ -112,14 +141,12 @@ EOF
 echo "Wrote new static config to $SRC"
 
 # -- Restart networking -----------------------------------------------------
-
 echo "Restarting networking..."
 if systemctl is-active --quiet networking; then
   systemctl restart networking
 else
-  # fallback
   ifdown "$IFACE" || true
   ifup   "$IFACE"
 fi
 
-echo "✅  $IFACE is now STATIC ($IP/$PREFIX via $GATEWAY)"
+echo "✅  $IFACE is now static ($IP/$PREFIX via $GATEWAY)"
