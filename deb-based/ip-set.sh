@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
 # --- Constants ---
 INTERFACES_FILE="/etc/network/interfaces"
@@ -26,31 +26,40 @@ EOF
 
 interactive_prompt() {
   echo "No arguments provided. Entering interactive mode..."
-  read -p "Interface name (e.g., eth0): " IFACE
-  while [[ -z "$IFACE" ]]; do
-    read -p "Interface cannot be empty. Enter interface: " IFACE
+  # Prompt for interface
+  while true; do
+    read -rp "Interface name (e.g., eth0): " IFACE
+    [[ -n "$IFACE" ]] && break
+    echo "Interface cannot be empty."
   done
 
-  PS3="Select mode: "
-  options=(dhcp static)
-  select MODE in "\${options[@]}"; do
-    [[ -n "$MODE" ]] && break
-    echo "Invalid choice."
+  # Prompt for mode using a validated select
+  PS3="Select mode (1 for dhcp, 2 for static): "
+  options=("dhcp" "static")
+  select choice in "${options[@]}"; do
+    if [[ -n "$choice" ]]; then
+      MODE=$choice
+      break
+    else
+      echo "Invalid choice. Please enter 1 or 2."
+    fi
   done
 
+  # If static, prompt for details
   if [[ "$MODE" == "static" ]]; then
-    read -p "Static IP address: " IP
-    read -p "Netmask: " NETMASK
-    read -p "Gateway: " GATEWAY
-    read -p "DNS servers (space-separated): " DNS
+    read -rp "Static IP address: " IP
+    read -rp "Netmask: " NETMASK
+    read -rp "Gateway: " GATEWAY
+    read -rp "DNS servers (space-separated): " DNS
   fi
 }
 
 # --- Parse args ---
-if [[ " $* " == *" -h "* || " $* " == *" --help "* ]]; then
+if [[ " ${*:-} " =~ " -h " || " ${*:-} " =~ " --help " ]]; then
   print_usage
 fi
 
+# Process flags
 while [[ $# -gt 0 ]]; do
   case $1 in
     --ifname)   IFACE="$2"; shift 2;;
@@ -63,31 +72,32 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# If no mandatory args provided, go interactive
-if [[ -z "$IFACE" || -z "$MODE" ]]; then
+# Enter interactive if missing required
+if [[ -z "${IFACE:-}" || -z "${MODE:-}" ]]; then
   interactive_prompt
 fi
 
-# --- Checks ---
+# Validate root
 if [[ $EUID -ne 0 ]]; then
   echo "This script must be run as root." >&2
   exit 1
 fi
 
+# Validate static params
 if [[ "$MODE" == "static" ]]; then
   for var in IP NETMASK GATEWAY DNS; do
-    if [[ -z "${!var}" ]]; then
+    if [[ -z "${!var:-}" ]]; then
       echo "Static mode requires $var to be set." >&2
       exit 1
     fi
   done
 fi
 
-# --- Backup ---
+# Backup original
 cp "$INTERFACES_FILE" "$BACKUP_FILE"
 echo "Backup saved: $BACKUP_FILE"
 
-# --- Generate new config ---
+# Write new config
 {
   echo "source /etc/network/interfaces.d/*"
   echo
@@ -105,7 +115,13 @@ echo "Backup saved: $BACKUP_FILE"
   fi
 } > "$INTERFACES_FILE"
 
-# --- Restart networking ---
-systemctl restart networking
-
-echo "Interface $IFACE is now set to $MODE mode."
+# Apply changes
+if systemctl restart networking; then
+  echo "Interface $IFACE is now set to $MODE mode."
+else
+  echo "Failed to restart networking. Restoring backup..." >&2
+  mv "$BACKUP_FILE" "$INTERFACES_FILE"
+  systemctl restart networking
+  echo "Restored previous configuration."
+  exit 1
+fi
