@@ -32,6 +32,13 @@ see on siis kui apt ütleb, et on mingi pask bookwormi repo. paste see noh mdea.
     wget -qO- https://raw.githubusercontent.com/NewSchoolAlt/linuxpask/refs/heads/main/deb-based/fix_repos.sh | bash
 
 
+## set-ip
+
+määrab staatilise IP ning muudab DNS'i kooli DNS'iks.
+
+    wget -qO- https://raw.githubusercontent.com/NewSchoolAlt/linuxpask/refs/heads/main/deb-based/set-ip.sh | bash
+
+
 ## suggestions
 
 - Kui on midagi mis tahad et teeks, siis kirjuta mulle discordi vms. Kui viitsin, teen
